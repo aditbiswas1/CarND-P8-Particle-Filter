@@ -117,12 +117,74 @@ void ParticleFilter::updateWeights(double sensor_range, double std_landmark[],
     //   for the fact that the map's y-axis actually points downwards.)
     //   http://planning.cs.uiuc.edu/node99.html
 
+    for (int i=0; i < num_particles; i++){
+
+        Particle particle = particles[i];
+
+        // tranform observations to MAP coordinate system
+        std::vector<LandmarkObs> transformed_observations;
+
+        for (LandmarkObs& observation: observations){
+            LandmarkObs transformed_observation;
+            transformed_observation.id = observation.id;
+            transformed_observation.x = observation.x * cos(particle.theta) - observation.y * sin(particle.theta) + particle.x;
+            transformed_observation.y = observation.x * sin(particle.theta) + observation.y * cos(particle.theta) + particle.y;
+            transformed_observations.push_back(transformed_observation);
+        }
+
+        // Obtain predicted landmark list
+        std::vector<LandmarkObs> predicted;
+        for (Map::single_landmark_s& landmark : map_landmarks.landmark_list) {
+
+          if (dist(landmark.x_f, landmark.y_f, particle.x, particle.y) <= sensor_range) {
+            LandmarkObs prediction {landmark.id_i, landmark.x_f, landmark.y_f};
+            predicted.push_back(prediction);
+          }
+        }
+
+        // associate observations with predictions
+        dataAssociation(predicted, transformed_observations);
+
+        // update weight of particle 
+        particle.weight = 1;
+        // For each observation
+        for (const LandmarkObs& observation : transformed_observations)
+        {
+        
+          // Get current prediction
+          Map::single_landmark_s prediction = map_landmarks.landmark_list[observation.id - 1];
+          
+          // Differences in x and y between measurement and prediction
+          double dx = observation.x - prediction.x_f;
+          double dy = observation.y - prediction.y_f;
+          
+          // Calculate the new weight
+          double new_weight = 1 / (M_PI * 2 * std_landmark[0] * std_landmark[1]) *
+            std::exp(-1 * (pow(dx, 2) / pow(std_landmark[0], 2) + pow(dy, 2) / pow(std_landmark[1], 2)));
+          
+          // Multiply running product of weights by the new weight
+          particle.weight *= new_weight;
+        }
+        weights[i] = particle.weight;
+
+    }
 }
 
 void ParticleFilter::resample() {
     // TODO: Resample particles with replacement with probability proportional to their weight. 
     // NOTE: You may find std::discrete_distribution helpful here.
     //   http://en.cppreference.com/w/cpp/numeric/random/discrete_distribution
+    std::default_random_engine gen;
+    std::discrete_distribution<int> distribution {weights.begin(), weights.end()};
+
+    std::vector<Particle> new_particles;
+    for (int i=0; i < num_particles; i++){
+        int new_particle_index = distribution(gen);
+        Particle new_particle = particles[new_particle_index];
+        new_particles.push_back(new_particle);
+    }
+
+    particles = new_particles;
 }
 
 void ParticleFilter::write(std::string filename) {
